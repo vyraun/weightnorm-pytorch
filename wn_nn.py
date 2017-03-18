@@ -9,28 +9,31 @@ import torch.nn.functional as F
 from torch.nn import Parameter
 from torch.autograd import Variable
 
-def get_var_maybe_avg(namespace, var_name, training, **kwargs):
+def get_var_maybe_avg(namespace, var_name, training, polyak_decay):
     ''' utility for retrieving polyak averaged params '''
+    
+    # Update average
+    v = getattr(namespace, var_name)
+    v_avg = getattr(namespace, var_name + '_avg')
+    # if v_avg.sum() == 0:
+    #     v_avg.copy_(v.data)
+    # else:
+    v_avg -= (1 - polyak_decay) * (v_avg - v.data)
+
     if training:
-        v = getattr(namespace, var_name)
+        return v
     else:
-        # Update average
-        v = getattr(namespace, var_name)
-        v_avg = getattr(namespace, var_name + '_avg')
-        v_avg -= (1 - polyak_decay) * (v_avg - v.data)
+        return Variable(v_avg)
 
-        v = Variable(v_avg)
-    return v
-
-def get_vars_maybe_avg(namespace, var_names, training, **kwargs):
+def get_vars_maybe_avg(namespace, var_names, training, polyak_decay):
     ''' utility for retrieving polyak averaged params '''
     vars = []
     for vn in var_names:
-        vars.append(get_var_maybe_avg(namespace, vn, training, **kwargs))
+        vars.append(get_var_maybe_avg(namespace, vn, training, polyak_decay))
     return vars
 
 # def WN_Linear(nn.Module):
-#     def __init__(self, in_features, out_features, init_scale=1., polyak_decay=0.995):
+#     def __init__(self, in_features, out_features, init_scale=1., polyak_decay=0.9995):
 #         super(Linear, self).__init__()
 #         self.in_features = in_features
 #         self.out_features = out_features
@@ -106,7 +109,7 @@ def get_vars_maybe_avg(namespace, var_names, training, **kwargs):
 #             return x
 
 class WN_Linear(nn.Linear):
-    def __init__(self, in_features, out_features, init_scale=1., polyak_decay=0.995):
+    def __init__(self, in_features, out_features, init_scale=1., polyak_decay=0.9995):
         super(WN_Linear, self).__init__(in_features, out_features, bias=True)
 
         self.V = self.weight
@@ -138,6 +141,9 @@ class WN_Linear(nn.Linear):
             self.g.data.copy_(scale_init)
             self.b.data.copy_(-m_init*scale_init)
             x_init = scale_init.view(1, -1).expand_as(x_init)*(x_init-m_init.view(1, -1).expand_as(x_init))
+            self.V_avg.copy_(self.V.data)
+            self.g_avg.copy_(self.g.data)
+            self.b_avg.copy_(self.b.data)
             return Variable(x_init)
         else:
             V,g,b = get_vars_maybe_avg(self, ['V','g','b'], self.training, polyak_decay=self.polyak_decay)
@@ -147,7 +153,7 @@ class WN_Linear(nn.Linear):
             return x
 
 class WN_Conv2d(nn.Conv2d):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, init_scale=1., polyak_decay=0.995):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, init_scale=1., polyak_decay=0.9995):
         super(WN_Conv2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups)
 
         self.V = self.weight # out_channels, in_channels // groups, *kernel_size
@@ -182,6 +188,9 @@ class WN_Conv2d(nn.Conv2d):
             self.b.data.copy_(-m_init*scale_init)
             x_init = scale_init.view(1, self.out_channels, *([1] * (len(x_init.size()) - 2))).expand_as(x_init)\
                 *(x_init-m_init.view(1, self.out_channels, *([1] * (len(x_init.size()) - 2))).expand_as(x_init))
+            self.V_avg.copy_(self.V.data)
+            self.g_avg.copy_(self.g.data)
+            self.b_avg.copy_(self.b.data)
             return Variable(x_init)
         else:
             V,g,b = get_vars_maybe_avg(self, ['V','g','b'], self.training, polyak_decay=self.polyak_decay)
@@ -228,7 +237,7 @@ class WN_Conv2d(nn.Conv2d):
 #             return x
 
 class WN_ConvTranspose2d(nn.ConvTranspose2d):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, groups=1, init_scale=1., polyak_decay=0.995):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, groups=1, init_scale=1., polyak_decay=0.9995):
         super(WN_ConvTranspose2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, output_padding, groups)
 
         self.V = self.weight # in_channels, out_channels, *kernel_size
@@ -263,6 +272,9 @@ class WN_ConvTranspose2d(nn.ConvTranspose2d):
             self.b.data.copy_(-m_init*scale_init)
             x_init = scale_init.view(1, self.out_channels, *([1] * (len(x_init.size()) - 2))).expand_as(x_init)\
                 *(x_init-m_init.view(1, self.out_channels, *([1] * (len(x_init.size()) - 2))).expand_as(x_init))
+            self.V_avg.copy_(self.V.data)
+            self.g_avg.copy_(self.g.data)
+            self.b_avg.copy_(self.b.data)
             return Variable(x_init)
         else:
             V,g,b = get_vars_maybe_avg(self, ['V','g','b'], self.training, polyak_decay=self.polyak_decay)
